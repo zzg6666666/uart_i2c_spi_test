@@ -67,13 +67,17 @@ void HAL_MspInit(void)
 
   /* USER CODE END MspInit 0 */
 
+  //AFIO时钟
+  //APB2 外设时钟使能寄存器
   __HAL_RCC_AFIO_CLK_ENABLE();
+  //电源管理
   __HAL_RCC_PWR_CLK_ENABLE();
 
   /* System interrupt init*/
 
   /** NOJTAG: JTAG-DP Disabled and SW-DP Enabled
   */
+ //关闭Jtag调试 开启SW调试 (AFIO_MAPR)寄存器
   __HAL_AFIO_REMAP_SWJ_NOJTAG();
 
   /* USER CODE BEGIN MspInit 1 */

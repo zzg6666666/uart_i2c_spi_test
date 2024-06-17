@@ -281,7 +281,7 @@
 /** @addtogroup UART_Private_Functions  UART Private Functions
   * @{
   */
-
+//开启寄存器中断
 #if (USE_HAL_UART_REGISTER_CALLBACKS == 1)
 void UART_InitCallbacksToDefault(UART_HandleTypeDef *huart);
 #endif /* USE_HAL_UART_REGISTER_CALLBACKS */
@@ -1378,6 +1378,7 @@ HAL_StatusTypeDef HAL_UART_Transmit_DMA(UART_HandleTypeDef *huart, const uint8_t
   const uint32_t *tmp;
 
   /* Check that a Tx process is not already ongoing */
+  //确保串口就绪能被使用
   if (huart->gState == HAL_UART_STATE_READY)
   {
     if ((pData == NULL) || (Size == 0U))
@@ -1385,30 +1386,38 @@ HAL_StatusTypeDef HAL_UART_Transmit_DMA(UART_HandleTypeDef *huart, const uint8_t
       return HAL_ERROR;
     }
 
+    //将串口发送的数据指向pData
     huart->pTxBuffPtr = pData;
+    //需要发送的数据大小
     huart->TxXferSize = Size;
+    //计数迭代
     huart->TxXferCount = Size;
-
+    //串口错误位码清零
     huart->ErrorCode = HAL_UART_ERROR_NONE;
+    //设置串口状态为忙
     huart->gState = HAL_UART_STATE_BUSY_TX;
 
     /* Set the UART DMA transfer complete callback */
+    //设置DMA发送完成回掉
     huart->hdmatx->XferCpltCallback = UART_DMATransmitCplt;
-
+    //设置DMA发送完成一半回掉
     /* Set the UART DMA Half transfer complete callback */
     huart->hdmatx->XferHalfCpltCallback = UART_DMATxHalfCplt;
-
+    //设置DMA发送失败回掉
     /* Set the DMA error callback */
     huart->hdmatx->XferErrorCallback = UART_DMAError;
-
+    //设置DMA发送中断回掉
     /* Set the DMA abort callback */
     huart->hdmatx->XferAbortCallback = NULL;
 
     /* Enable the UART transmit DMA channel */
+    //启用串口发送DMA通道
     tmp = (const uint32_t *)&pData;
+    //打开DMA发送中断
     HAL_DMA_Start_IT(huart->hdmatx, *(const uint32_t *)tmp, (uint32_t)&huart->Instance->DR, Size);
 
     /* Clear the TC flag in the SR register by writing 0 to it */
+    //
     __HAL_UART_CLEAR_FLAG(huart, UART_FLAG_TC);
 
     /* Enable the DMA transfer for transmit request by setting the DMAT bit
@@ -2568,6 +2577,7 @@ void HAL_UART_IRQHandler(UART_HandleTypeDef *huart)
   /* UART in mode Transmitter ------------------------------------------------*/
   if (((isrflags & USART_SR_TXE) != RESET) && ((cr1its & USART_CR1_TXEIE) != RESET))
   {
+    //发送
     UART_Transmit_IT(huart);
     return;
   }

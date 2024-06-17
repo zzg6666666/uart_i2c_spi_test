@@ -175,36 +175,46 @@ HAL_StatusTypeDef HAL_DMA_Init(DMA_HandleTypeDef *hdma)
   }
 #else
   /* DMA1 */
+  //计算出DMA1的index，通过hdma->Instance 的地址减去DMA1_Channel1的地址，得到地址数值差，再用数值差除两个通道的地址差额，就可以得到通道index
   hdma->ChannelIndex = (((uint32_t)hdma->Instance - (uint32_t)DMA1_Channel1) / ((uint32_t)DMA1_Channel2 - (uint32_t)DMA1_Channel1)) << 2;
+  //DMA的基础地址
   hdma->DmaBaseAddress = DMA1;
 #endif /* DMA2 */
 
   /* Change DMA peripheral state */
+  //设置外设繁忙
   hdma->State = HAL_DMA_STATE_BUSY;
 
   /* Get the CR register value */
+  //读取DMA通道配置寄存器
   tmp = hdma->Instance->CCR;
 
   /* Clear PL, MSIZE, PSIZE, MINC, PINC, CIRC and DIR bits */
+  //清除DMA通道的通道优先级、存储器数据宽度、外设数据宽度、存储器地址增量模式、外设地址增量模式、循环模式、数据传输方向
   tmp &= ((uint32_t)~(DMA_CCR_PL    | DMA_CCR_MSIZE  | DMA_CCR_PSIZE  | \
                       DMA_CCR_MINC  | DMA_CCR_PINC   | DMA_CCR_CIRC   | \
                       DMA_CCR_DIR));
 
   /* Prepare the DMA Channel configuration */
+  //向temp变量写入init值
   tmp |=  hdma->Init.Direction        |
           hdma->Init.PeriphInc           | hdma->Init.MemInc           |
           hdma->Init.PeriphDataAlignment | hdma->Init.MemDataAlignment |
           hdma->Init.Mode                | hdma->Init.Priority;
 
   /* Write to DMA Channel CR register */
+  //把值写到通道配置寄存器
   hdma->Instance->CCR = tmp;
 
   /* Initialise the error code */
+  //初始化错误代码
   hdma->ErrorCode = HAL_DMA_ERROR_NONE;
 
   /* Initialize the DMA state*/
+  //初始化DMA状态
   hdma->State = HAL_DMA_STATE_READY;
   /* Allocate lock resource and initialize it */
+  //设置DMA状态为解锁
   hdma->Lock = HAL_UNLOCKED;
 
   return HAL_OK;
@@ -358,41 +368,55 @@ HAL_StatusTypeDef HAL_DMA_Start(DMA_HandleTypeDef *hdma, uint32_t SrcAddress, ui
   * @param  DataLength: The length of data to be transferred from source to destination
   * @retval HAL status
   */
+//启用DMA传输在中断模式下
 HAL_StatusTypeDef HAL_DMA_Start_IT(DMA_HandleTypeDef *hdma, uint32_t SrcAddress, uint32_t DstAddress, uint32_t DataLength)
 {
   HAL_StatusTypeDef status = HAL_OK;
 
   /* Check the parameters */
+  //检查发送的数据长度
   assert_param(IS_DMA_BUFFER_SIZE(DataLength));
 
   /* Process locked */
+  //设置DMA为锁定，防止其他进程调用rtos
   __HAL_LOCK(hdma);
   
   if(HAL_DMA_STATE_READY == hdma->State)
   {
     /* Change DMA peripheral state */
+    //改变DMA外设状态为忙
     hdma->State = HAL_DMA_STATE_BUSY;
+    //无错误码
     hdma->ErrorCode = HAL_DMA_ERROR_NONE;
     
     /* Disable the peripheral */
+    //禁用外设DMA
     __HAL_DMA_DISABLE(hdma);
     
     /* Configure the source, destination address and the data length & clear flags*/
+    //配置DMA的发送数据源、外设地址、发送数据长度
     DMA_SetConfig(hdma, SrcAddress, DstAddress, DataLength);
     
     /* Enable the transfer complete interrupt */
     /* Enable the transfer Error interrupt */
+    //启用寄存器的发送完成、发送错误中断
+
+    //发送完成一半回调函数不为空
     if(NULL != hdma->XferHalfCpltCallback)
     {
       /* Enable the Half transfer complete interrupt as well */
+      //启用寄存器的发送完成、发送完成一半、发送错误中断
       __HAL_DMA_ENABLE_IT(hdma, (DMA_IT_TC | DMA_IT_HT | DMA_IT_TE));
     }
+    //发送完成一半回调函数为空
     else
     {
+      //禁用发送完成一半中断，启用寄存器的发送完成、发送错误中断，
       __HAL_DMA_DISABLE_IT(hdma, DMA_IT_HT);
       __HAL_DMA_ENABLE_IT(hdma, (DMA_IT_TC | DMA_IT_TE));
     }
     /* Enable the Peripheral */
+    //使能外设
     __HAL_DMA_ENABLE(hdma);
   }
   else
@@ -854,21 +878,27 @@ uint32_t HAL_DMA_GetError(DMA_HandleTypeDef *hdma)
   * @param  DataLength: The length of data to be transferred from source to destination
   * @retval HAL status
   */
+ //设置DMA参数
 static void DMA_SetConfig(DMA_HandleTypeDef *hdma, uint32_t SrcAddress, uint32_t DstAddress, uint32_t DataLength)
 {
   /* Clear all flags */
+  //关闭DMA/4 通道的全局中断
   hdma->DmaBaseAddress->IFCR = (DMA_ISR_GIF1 << hdma->ChannelIndex);
 
   /* Configure DMA Channel data length */
+  //配置DMA通道的数据长度
   hdma->Instance->CNDTR = DataLength;
 
   /* Memory to Peripheral */
+  //设置DMA发送的方向是内存到外设
   if((hdma->Init.Direction) == DMA_MEMORY_TO_PERIPH)
   {
     /* Configure DMA Channel destination address */
+    //外设数据寄存器的基地址，作为数据传输的源或目标
     hdma->Instance->CPAR = DstAddress;
 
     /* Configure DMA Channel source address */
+    //存储器地址作为数据传输的源或目标
     hdma->Instance->CMAR = SrcAddress;
   }
   /* Peripheral to Memory */

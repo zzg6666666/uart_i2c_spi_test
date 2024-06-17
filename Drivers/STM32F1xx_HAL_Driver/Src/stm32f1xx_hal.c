@@ -148,17 +148,21 @@ HAL_StatusTypeDef HAL_Init(void)
     defined(STM32F103x6) || defined(STM32F103xB) || defined(STM32F103xE) || defined(STM32F103xG) || \
     defined(STM32F105xC) || defined(STM32F107xC)
 
+  //开启缓存预读功能
   /* Prefetch buffer is not available on value line devices */
   __HAL_FLASH_PREFETCH_BUFFER_ENABLE();
 #endif
 #endif /* PREFETCH_ENABLE */
 
+  //设置抢占优先级和子优先级
   /* Set Interrupt Group Priority */
   HAL_NVIC_SetPriorityGrouping(NVIC_PRIORITYGROUP_4);
 
+  //设置1ms一次的systick
   /* Use systick as time base source and configure 1ms tick (default clock after Reset is HSI) */
   HAL_InitTick(TICK_INT_PRIORITY);
 
+  //初始化硬件
   /* Init the low level hardware */
   HAL_MspInit();
 

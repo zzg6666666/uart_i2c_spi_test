@@ -317,7 +317,7 @@
 
 /* Includes ------------------------------------------------------------------*/
 #include "stm32f1xx_hal.h"
-
+#include "uart_printf.h"
 /** @addtogroup STM32F1xx_HAL_Driver
   * @{
   */
@@ -487,6 +487,7 @@ HAL_StatusTypeDef HAL_I2C_Init(I2C_HandleTypeDef *hi2c)
     /* Allocate lock resource and initialize it */
     hi2c->Lock = HAL_UNLOCKED;
 
+    //开启寄存器回调函数后，使用HAL_I2C_RegisterCallback注册
 #if (USE_HAL_I2C_REGISTER_CALLBACKS == 1)
     /* Init the I2C Callback settings */
     hi2c->MasterTxCpltCallback = HAL_I2C_MasterTxCpltCallback; /* Legacy weak MasterTxCpltCallback */
@@ -509,56 +510,70 @@ HAL_StatusTypeDef HAL_I2C_Init(I2C_HandleTypeDef *hi2c)
     hi2c->MspInitCallback(hi2c);
 #else
     /* Init the low level hardware : GPIO, CLOCK, NVIC */
+    //初始化低等级硬件
     HAL_I2C_MspInit(hi2c);
 #endif /* USE_HAL_I2C_REGISTER_CALLBACKS */
   }
 
+  //设置i2c状态，防止其他程序调用
   hi2c->State = HAL_I2C_STATE_BUSY;
 
   /* Disable the selected I2C peripheral */
+  //关闭I2C外设 控制寄存器CR1 bit0
   __HAL_I2C_DISABLE(hi2c);
 
   /*Reset I2C*/
+  //重置I2c状态 CR1 bit15
   hi2c->Instance->CR1 |= I2C_CR1_SWRST;
   hi2c->Instance->CR1 &= ~I2C_CR1_SWRST;
 
   /* Get PCLK1 frequency */
+  //获取PCLK频率
   pclk1 = HAL_RCC_GetPCLK1Freq();
 
   /* Check the minimum allowed PCLK1 frequency */
+  //检查允许的最小 PCLK1 频率
   if (I2C_MIN_PCLK_FREQ(pclk1, hi2c->Init.ClockSpeed) == 1U)
   {
     return HAL_ERROR;
   }
 
   /* Calculate frequency range */
+  //计算频率范围
   freqrange = I2C_FREQRANGE(pclk1);
 
   /*---------------------------- I2Cx CR2 Configuration ----------------------*/
   /* Configure I2Cx: Frequency range */
+  //CR2寄存器 bit[5:0] I2C的输入频率
   MODIFY_REG(hi2c->Instance->CR2, I2C_CR2_FREQ, freqrange);
 
   /*---------------------------- I2Cx TRISE Configuration --------------------*/
   /* Configure I2Cx: Rise Time */
+  //TRISE寄存器 bit[5:0] scl的上升时间
   MODIFY_REG(hi2c->Instance->TRISE, I2C_TRISE_TRISE, I2C_RISE_TIME(freqrange, hi2c->Init.ClockSpeed));
 
   /*---------------------------- I2Cx CCR Configuration ----------------------*/
   /* Configure I2Cx: Speed */
+  //CCR寄存器 bit15标准/快速模式， bit14 快速模式下的占空比 bit[11:0]分频系数
   MODIFY_REG(hi2c->Instance->CCR, (I2C_CCR_FS | I2C_CCR_DUTY | I2C_CCR_CCR), I2C_SPEED(pclk1, hi2c->Init.ClockSpeed, hi2c->Init.DutyCycle));
 
   /*---------------------------- I2Cx CR1 Configuration ----------------------*/
   /* Configure I2Cx: Generalcall and NoStretch mode */
+  //CR1寄存器 bit6广播功能、bit7时钟延长
   MODIFY_REG(hi2c->Instance->CR1, (I2C_CR1_ENGC | I2C_CR1_NOSTRETCH), (hi2c->Init.GeneralCallMode | hi2c->Init.NoStretchMode));
 
   /*---------------------------- I2Cx OAR1 Configuration ---------------------*/
   /* Configure I2Cx: Own Address1 and addressing mode */
+  //自身地址寄存器 OAR1 bit15 地址长度 bit[9:8]接口地址第8和9位 bit[7:1] 接口地址的7-1位 bit0 接口地址第0位
   MODIFY_REG(hi2c->Instance->OAR1, (I2C_OAR1_ADDMODE | I2C_OAR1_ADD8_9 | I2C_OAR1_ADD1_7 | I2C_OAR1_ADD0), (hi2c->Init.AddressingMode | hi2c->Init.OwnAddress1));
 
   /*---------------------------- I2Cx OAR2 Configuration ---------------------*/
   /* Configure I2Cx: Dual mode and Own Address2 */
+  //自身地址寄存器 OAR2
   MODIFY_REG(hi2c->Instance->OAR2, (I2C_OAR2_ENDUAL | I2C_OAR2_ADD2), (hi2c->Init.DualAddressMode | hi2c->Init.OwnAddress2));
 
   /* Enable the selected I2C peripheral */
+  //启用I2C外设
   __HAL_I2C_ENABLE(hi2c);
 
   hi2c->ErrorCode = HAL_I2C_ERROR_NONE;
@@ -1071,6 +1086,7 @@ static void I2C_Flush_DR(I2C_HandleTypeDef *hi2c)
   * @param  Timeout Timeout duration
   * @retval HAL status
   */
+//阻塞发送
 HAL_StatusTypeDef HAL_I2C_Master_Transmit(I2C_HandleTypeDef *hi2c, uint16_t DevAddress, uint8_t *pData, uint16_t Size, uint32_t Timeout)
 {
   /* Init tickstart for timeout management*/
@@ -1079,66 +1095,91 @@ HAL_StatusTypeDef HAL_I2C_Master_Transmit(I2C_HandleTypeDef *hi2c, uint16_t DevA
   if (hi2c->State == HAL_I2C_STATE_READY)
   {
     /* Wait until BUSY flag is reset */
+    //等待SR2 bit1 为0,总线上无数据通信
     if (I2C_WaitOnFlagUntilTimeout(hi2c, I2C_FLAG_BUSY, SET, I2C_TIMEOUT_BUSY_FLAG, tickstart) != HAL_OK)
     {
       return HAL_BUSY;
     }
 
     /* Process Locked */
+    //锁定I2c
     __HAL_LOCK(hi2c);
 
+    //检查I2c是否被禁用，I2C当前通讯结束后 i2c模块会被禁用
     /* Check if the I2C is already enabled */
     if ((hi2c->Instance->CR1 & I2C_CR1_PE) != I2C_CR1_PE)
     {
       /* Enable I2C peripheral */
+      //使能I2c模块
       __HAL_I2C_ENABLE(hi2c);
     }
 
     /* Disable Pos */
+    //禁用Pos
     CLEAR_BIT(hi2c->Instance->CR1, I2C_CR1_POS);
 
+    //发送状态忙
     hi2c->State       = HAL_I2C_STATE_BUSY_TX;
+    //master模式
     hi2c->Mode        = HAL_I2C_MODE_MASTER;
+    //设置错误码
     hi2c->ErrorCode   = HAL_I2C_ERROR_NONE;
 
     /* Prepare transfer parameters */
+    //准备发送参数
+
+    //发送数据地址
     hi2c->pBuffPtr    = pData;
+    //发送数据计数
     hi2c->XferCount   = Size;
+    //发送数据大小
     hi2c->XferSize    = hi2c->XferCount;
+    //数据发送选项
     hi2c->XferOptions = I2C_NO_OPTION_FRAME;
 
     /* Send Slave Address */
+    //发送接收端地址
     if (I2C_MasterRequestWrite(hi2c, DevAddress, Timeout, tickstart) != HAL_OK)
     {
       return HAL_ERROR;
     }
 
+    //读取SR1和SR2 再操作对应的CR寄存器，清零SR1和SR2寄存器的某些位
     /* Clear ADDR flag */
     __HAL_I2C_CLEAR_ADDRFLAG(hi2c);
 
     while (hi2c->XferSize > 0U)
     {
+      //发送数据寄存器非空 SR1 bit7
       /* Wait until TXE flag is set */
       if (I2C_WaitOnTXEFlagUntilTimeout(hi2c, Timeout, tickstart) != HAL_OK)
       {
+        //应答错误 从机没有回答
         if (hi2c->ErrorCode == HAL_I2C_ERROR_AF)
         {
           /* Generate Stop */
+          //设置停止位
           SET_BIT(hi2c->Instance->CR1, I2C_CR1_STOP);
         }
+        //超时未等到 TXE为空
         return HAL_ERROR;
       }
 
       /* Write data to DR */
+      //发送数据到移位寄存器
       hi2c->Instance->DR = *hi2c->pBuffPtr;
 
       /* Increment Buffer pointer */
+      //指针地址增加1
       hi2c->pBuffPtr++;
 
       /* Update counter */
+      //发送数据计数减1
       hi2c->XferCount--;
+      //发送数据尺寸减1
       hi2c->XferSize--;
 
+      //字节发送结束且数据已经发送完毕 SR1 bit2
       if ((__HAL_I2C_GET_FLAG(hi2c, I2C_FLAG_BTF) == SET) && (hi2c->XferSize != 0U))
       {
         /* Write data to DR */
@@ -1153,18 +1194,22 @@ HAL_StatusTypeDef HAL_I2C_Master_Transmit(I2C_HandleTypeDef *hi2c, uint16_t DevA
       }
 
       /* Wait until BTF flag is set */
+      //发送数据结束 SR1 bit2
       if (I2C_WaitOnBTFFlagUntilTimeout(hi2c, Timeout, tickstart) != HAL_OK)
       {
         if (hi2c->ErrorCode == HAL_I2C_ERROR_AF)
         {
           /* Generate Stop */
+          //未应答错误
           SET_BIT(hi2c->Instance->CR1, I2C_CR1_STOP);
         }
+        //超时错误
         return HAL_ERROR;
       }
     }
 
     /* Generate Stop */
+    //设置停止条件
     SET_BIT(hi2c->Instance->CR1, I2C_CR1_STOP);
 
     hi2c->State = HAL_I2C_STATE_READY;
@@ -1192,6 +1237,8 @@ HAL_StatusTypeDef HAL_I2C_Master_Transmit(I2C_HandleTypeDef *hi2c, uint16_t DevA
   * @param  Timeout Timeout duration
   * @retval HAL status
   */
+
+//阻塞接收
 HAL_StatusTypeDef HAL_I2C_Master_Receive(I2C_HandleTypeDef *hi2c, uint16_t DevAddress, uint8_t *pData, uint16_t Size, uint32_t Timeout)
 {
   __IO uint32_t count = 0U;
@@ -1202,6 +1249,8 @@ HAL_StatusTypeDef HAL_I2C_Master_Receive(I2C_HandleTypeDef *hi2c, uint16_t DevAd
   if (hi2c->State == HAL_I2C_STATE_READY)
   {
     /* Wait until BUSY flag is reset */
+
+    //等待i2c总线不在被占用 sr2 bit1
     if (I2C_WaitOnFlagUntilTimeout(hi2c, I2C_FLAG_BUSY, SET, I2C_TIMEOUT_BUSY_FLAG, tickstart) != HAL_OK)
     {
       return HAL_BUSY;
@@ -1210,6 +1259,7 @@ HAL_StatusTypeDef HAL_I2C_Master_Receive(I2C_HandleTypeDef *hi2c, uint16_t DevAd
     /* Process Locked */
     __HAL_LOCK(hi2c);
 
+    //使能i2c cr1 bit0
     /* Check if the I2C is already enabled */
     if ((hi2c->Instance->CR1 & I2C_CR1_PE) != I2C_CR1_PE)
     {
@@ -1218,6 +1268,7 @@ HAL_StatusTypeDef HAL_I2C_Master_Receive(I2C_HandleTypeDef *hi2c, uint16_t DevAd
     }
 
     /* Disable Pos */
+    //ack位控制的当前接受的字节 pec表示当前移位寄存器的字节是pec
     CLEAR_BIT(hi2c->Instance->CR1, I2C_CR1_POS);
 
     hi2c->State       = HAL_I2C_STATE_BUSY_RX;
@@ -1231,6 +1282,7 @@ HAL_StatusTypeDef HAL_I2C_Master_Receive(I2C_HandleTypeDef *hi2c, uint16_t DevAd
     hi2c->XferOptions = I2C_NO_OPTION_FRAME;
 
     /* Send Slave Address */
+    //发送起始地址 7bit或者10bit
     if (I2C_MasterRequestRead(hi2c, DevAddress, Timeout, tickstart) != HAL_OK)
     {
       return HAL_ERROR;
@@ -1239,9 +1291,11 @@ HAL_StatusTypeDef HAL_I2C_Master_Receive(I2C_HandleTypeDef *hi2c, uint16_t DevAd
     if (hi2c->XferSize == 0U)
     {
       /* Clear ADDR flag */
+      //读取sr1 sr2寄存器，用于清除sr1 bit1
       __HAL_I2C_CLEAR_ADDRFLAG(hi2c);
 
       /* Generate Stop */
+      //发送停止信号
       SET_BIT(hi2c->Instance->CR1, I2C_CR1_STOP);
     }
     else if (hi2c->XferSize == 1U)
@@ -1741,10 +1795,13 @@ HAL_StatusTypeDef HAL_I2C_Slave_Receive(I2C_HandleTypeDef *hi2c, uint8_t *pData,
   * @param  Size Amount of data to be sent
   * @retval HAL status
   */
+ 
+ //中断发送，
 HAL_StatusTypeDef HAL_I2C_Master_Transmit_IT(I2C_HandleTypeDef *hi2c, uint16_t DevAddress, uint8_t *pData, uint16_t Size)
 {
   __IO uint32_t count = 0U;
 
+  //等待总线上无数据通信，这里等待的25ms的时间,阻塞发送采用HAL_GetTick去计时
   if (hi2c->State == HAL_I2C_STATE_READY)
   {
     /* Wait until BUSY flag is reset */
@@ -1757,6 +1814,7 @@ HAL_StatusTypeDef HAL_I2C_Master_Transmit_IT(I2C_HandleTypeDef *hi2c, uint16_t D
         hi2c->PreviousState       = I2C_STATE_NONE;
         hi2c->State               = HAL_I2C_STATE_READY;
         hi2c->Mode                = HAL_I2C_MODE_NONE;
+        //超时错误
         hi2c->ErrorCode           |= HAL_I2C_ERROR_TIMEOUT;
 
         return HAL_BUSY;
@@ -1765,9 +1823,11 @@ HAL_StatusTypeDef HAL_I2C_Master_Transmit_IT(I2C_HandleTypeDef *hi2c, uint16_t D
     while (__HAL_I2C_GET_FLAG(hi2c, I2C_FLAG_BUSY) != RESET);
 
     /* Process Locked */
+    //锁定I2c
     __HAL_LOCK(hi2c);
 
     /* Check if the I2C is already enabled */
+    //检查I2c是否被禁用(空闲)，I2C当前通讯结束后 i2c模块会被禁用
     if ((hi2c->Instance->CR1 & I2C_CR1_PE) != I2C_CR1_PE)
     {
       /* Enable I2C peripheral */
@@ -1775,17 +1835,24 @@ HAL_StatusTypeDef HAL_I2C_Master_Transmit_IT(I2C_HandleTypeDef *hi2c, uint16_t D
     }
 
     /* Disable Pos */
+    //禁用pos(应答或者数据接收)
     CLEAR_BIT(hi2c->Instance->CR1, I2C_CR1_POS);
 
+    //设置发送忙
     hi2c->State     = HAL_I2C_STATE_BUSY_TX;
+    //主机发送
     hi2c->Mode      = HAL_I2C_MODE_MASTER;
     hi2c->ErrorCode = HAL_I2C_ERROR_NONE;
 
     /* Prepare transfer parameters */
+    //发送数据地址
     hi2c->pBuffPtr    = pData;
+    //发送数据计数
     hi2c->XferCount   = Size;
+    //发送数据大小
     hi2c->XferSize    = hi2c->XferCount;
     hi2c->XferOptions = I2C_NO_OPTION_FRAME;
+    //发送地址
     hi2c->Devaddress  = DevAddress;
 
     /* Process Unlocked */
@@ -1795,9 +1862,11 @@ HAL_StatusTypeDef HAL_I2C_Master_Transmit_IT(I2C_HandleTypeDef *hi2c, uint16_t D
               to avoid the risk of I2C interrupt handle execution before current
               process unlock */
     /* Enable EVT, BUF and ERR interrupt */
+    //启用事件、数据缓冲区非空中断、错误中断中断
     __HAL_I2C_ENABLE_IT(hi2c, I2C_IT_EVT | I2C_IT_BUF | I2C_IT_ERR);
 
     /* Generate Start */
+    //发出起始条件
     SET_BIT(hi2c->Instance->CR1, I2C_CR1_START);
 
     return HAL_OK;
@@ -4880,37 +4949,50 @@ void HAL_I2C_EV_IRQHandler(I2C_HandleTypeDef *hi2c)
 {
   uint32_t sr1itflags;
   uint32_t sr2itflags               = 0U;
+  //读取CR2寄存器
   uint32_t itsources                = READ_REG(hi2c->Instance->CR2);
+  //当前传输选项
   uint32_t CurrentXferOptions       = hi2c->XferOptions;
+  //当前传输模式
   HAL_I2C_ModeTypeDef CurrentMode   = hi2c->Mode;
+  //当前I2c状态
   HAL_I2C_StateTypeDef CurrentState = hi2c->State;
 
   /* Master or Memory mode selected */
+  //主机发送或者内存发送模式
   if ((CurrentMode == HAL_I2C_MODE_MASTER) || (CurrentMode == HAL_I2C_MODE_MEM))
   {
+    //读取SR2寄存器
     sr2itflags   = READ_REG(hi2c->Instance->SR2);
+    //读取SR1寄存器
     sr1itflags   = READ_REG(hi2c->Instance->SR1);
 
     /* Exit IRQ event until Start Bit detected in case of Other frame requested */
+    //未发送起始条件且发送选项是其他
     if ((I2C_CHECK_FLAG(sr1itflags, I2C_FLAG_SB) == RESET) && (IS_I2C_TRANSFER_OTHER_OPTIONS_REQUEST(CurrentXferOptions) == 1U))
     {
       return;
     }
 
+    //起始条件已经发送且开启了事件中断,准备发送地址
     /* SB Set ----------------------------------------------------------------*/
     if ((I2C_CHECK_FLAG(sr1itflags, I2C_FLAG_SB) != RESET) && (I2C_CHECK_IT_SOURCE(itsources, I2C_IT_EVT) != RESET))
     {
       /* Convert OTHER_xxx XferOptions if any */
+      //改变帧选项
       I2C_ConvertOtherXferOptions(hi2c);
 
+      //发送地址和打开DMA中断
       I2C_Master_SB(hi2c);
     }
     /* ADD10 Set -------------------------------------------------------------*/
+    //10位地址模式，主设备已经发送第一个地址字节，且开启了事件中断
     else if ((I2C_CHECK_FLAG(sr1itflags, I2C_FLAG_ADD10) != RESET) && (I2C_CHECK_IT_SOURCE(itsources, I2C_IT_EVT) != RESET))
     {
       I2C_Master_ADD10(hi2c);
     }
     /* ADDR Set --------------------------------------------------------------*/
+    //地址已经发送完成(7bit 和 10bit 模式) sr1 bit1，且开启了事件中断
     else if ((I2C_CHECK_FLAG(sr1itflags, I2C_FLAG_ADDR) != RESET) && (I2C_CHECK_IT_SOURCE(itsources, I2C_IT_EVT) != RESET))
     {
       I2C_Master_ADDR(hi2c);
@@ -5868,13 +5950,16 @@ static void I2C_Master_SB(I2C_HandleTypeDef *hi2c)
   }
   else
   {
+    //7位地址码
     if (hi2c->Init.AddressingMode == I2C_ADDRESSINGMODE_7BIT)
     {
       /* Send slave 7 Bits address */
+      //发送接收端地址(write操作)
       if (hi2c->State == HAL_I2C_STATE_BUSY_TX)
       {
         hi2c->Instance->DR = I2C_7BIT_ADD_WRITE(hi2c->Devaddress);
       }
+      //发送接收端地址(read操作)
       else
       {
         hi2c->Instance->DR = I2C_7BIT_ADD_READ(hi2c->Devaddress);
@@ -5887,15 +5972,18 @@ static void I2C_Master_SB(I2C_HandleTypeDef *hi2c)
         SET_BIT(hi2c->Instance->CR2, I2C_CR2_DMAEN);
       }
     }
+    //10位地址 发送地址头
     else
     {
       if (hi2c->EventCount == 0U)
       {
+        //发送接收端地址(write操作)
         /* Send header of slave address */
         hi2c->Instance->DR = I2C_10BIT_HEADER_WRITE(hi2c->Devaddress);
       }
       else if (hi2c->EventCount == 1U)
       {
+        //发送接收端地址(read操作)
         /* Send header of slave address */
         hi2c->Instance->DR = I2C_10BIT_HEADER_READ(hi2c->Devaddress);
       }
@@ -5939,6 +6027,7 @@ static void I2C_Master_ADDR(I2C_HandleTypeDef *hi2c)
   uint32_t CurrentXferOptions           = hi2c->XferOptions;
   uint32_t Prev_State                   = hi2c->PreviousState;
 
+  //主机接收模式
   if (hi2c->State == HAL_I2C_STATE_BUSY_RX)
   {
     if ((hi2c->EventCount == 0U) && (CurrentMode == HAL_I2C_MODE_MEM))
@@ -6660,17 +6749,23 @@ static void I2C_ITError(I2C_HandleTypeDef *hi2c)
   * @param  Tickstart Tick start value
   * @retval HAL status
   */
+
+ //
 static HAL_StatusTypeDef I2C_MasterRequestWrite(I2C_HandleTypeDef *hi2c, uint16_t DevAddress, uint32_t Timeout, uint32_t Tickstart)
 {
   /* Declaration of temporary variable to prevent undefined behavior of volatile usage */
+  //使用临时变量，预防volatile使用的未定义行为
   uint32_t CurrentXferOptions = hi2c->XferOptions;
 
+  //如果第一次传输，生成启动条件(SCL低电平期间，SDA从低电平向高电平跳变)
   /* Generate Start condition if first transfer */
   if ((CurrentXferOptions == I2C_FIRST_AND_LAST_FRAME) || (CurrentXferOptions == I2C_FIRST_FRAME) || (CurrentXferOptions == I2C_NO_OPTION_FRAME))
   {
     /* Generate Start */
+    //产生起始条件 CR1 bit8
     SET_BIT(hi2c->Instance->CR1, I2C_CR1_START);
   }
+  //主模式发送忙
   else if (hi2c->PreviousState == I2C_STATE_MASTER_BUSY_RX)
   {
     /* Generate ReStart */
@@ -6682,8 +6777,13 @@ static HAL_StatusTypeDef I2C_MasterRequestWrite(I2C_HandleTypeDef *hi2c, uint16_
   }
 
   /* Wait until SB flag is set */
+  //SR1寄存器，等待起始条件已经发送 SR1 bit0
+
+  //起始条件发送失败
   if (I2C_WaitOnFlagUntilTimeout(hi2c, I2C_FLAG_SB, RESET, Timeout, Tickstart) != HAL_OK)
   {
+
+    //CR1 bit8为1,I2c 启动失败
     if (READ_BIT(hi2c->Instance->CR1, I2C_CR1_START) == I2C_CR1_START)
     {
       hi2c->ErrorCode = HAL_I2C_WRONG_START;
@@ -6691,22 +6791,27 @@ static HAL_StatusTypeDef I2C_MasterRequestWrite(I2C_HandleTypeDef *hi2c, uint16_
     return HAL_TIMEOUT;
   }
 
+  //7bit 地址码
   if (hi2c->Init.AddressingMode == I2C_ADDRESSINGMODE_7BIT)
   {
     /* Send slave address */
+    //数据写到DR寄存器 bit[7:1]
     hi2c->Instance->DR = I2C_7BIT_ADD_WRITE(DevAddress);
   }
+  //10位地址码
   else
   {
     /* Send header of slave address */
+    //地址码bit[9:7]写到寄存器的bit[2:0],DR[7:4]为1，bit3为0,head :1111 0xxx
     hi2c->Instance->DR = I2C_10BIT_HEADER_WRITE(DevAddress);
 
     /* Wait until ADD10 flag is set */
+    //等待I2C地址头发送完毕 SR1 bit3
     if (I2C_WaitOnMasterAddressFlagUntilTimeout(hi2c, I2C_FLAG_ADD10, Timeout, Tickstart) != HAL_OK)
     {
       return HAL_ERROR;
     }
-
+    //发送后7位
     /* Send slave address */
     hi2c->Instance->DR = I2C_10BIT_ADDRESS(DevAddress);
   }
@@ -6736,8 +6841,10 @@ static HAL_StatusTypeDef I2C_MasterRequestRead(I2C_HandleTypeDef *hi2c, uint16_t
   uint32_t CurrentXferOptions = hi2c->XferOptions;
 
   /* Enable Acknowledge */
+  //启用应答 cr1 bit10
   SET_BIT(hi2c->Instance->CR1, I2C_CR1_ACK);
 
+  //发送启始条件 cr1 bit8
   /* Generate Start condition if first transfer */
   if ((CurrentXferOptions == I2C_FIRST_AND_LAST_FRAME) || (CurrentXferOptions == I2C_FIRST_FRAME)  || (CurrentXferOptions == I2C_NO_OPTION_FRAME))
   {
@@ -6754,6 +6861,7 @@ static HAL_StatusTypeDef I2C_MasterRequestRead(I2C_HandleTypeDef *hi2c, uint16_t
     /* Do nothing */
   }
 
+  //等待sr1 bit0为1 ，监测到启动条件
   /* Wait until SB flag is set */
   if (I2C_WaitOnFlagUntilTimeout(hi2c, I2C_FLAG_SB, RESET, Timeout, Tickstart) != HAL_OK)
   {
@@ -6764,6 +6872,7 @@ static HAL_StatusTypeDef I2C_MasterRequestRead(I2C_HandleTypeDef *hi2c, uint16_t
     return HAL_TIMEOUT;
   }
 
+  //7bit地址模式 发送第地址
   if (hi2c->Init.AddressingMode == I2C_ADDRESSINGMODE_7BIT)
   {
     /* Send slave address */
@@ -6774,6 +6883,7 @@ static HAL_StatusTypeDef I2C_MasterRequestRead(I2C_HandleTypeDef *hi2c, uint16_t
     /* Send header of slave address */
     hi2c->Instance->DR = I2C_10BIT_HEADER_WRITE(DevAddress);
 
+    //sr1 bit3 10位地址模式的头地址已经发送
     /* Wait until ADD10 flag is set */
     if (I2C_WaitOnMasterAddressFlagUntilTimeout(hi2c, I2C_FLAG_ADD10, Timeout, Tickstart) != HAL_OK)
     {
@@ -6781,8 +6891,10 @@ static HAL_StatusTypeDef I2C_MasterRequestRead(I2C_HandleTypeDef *hi2c, uint16_t
     }
 
     /* Send slave address */
+    //发送剩下的位
     hi2c->Instance->DR = I2C_10BIT_ADDRESS(DevAddress);
 
+    //等待sr1 bit1为1
     /* Wait until ADDR flag is set */
     if (I2C_WaitOnMasterAddressFlagUntilTimeout(hi2c, I2C_FLAG_ADDR, Timeout, Tickstart) != HAL_OK)
     {
@@ -6790,11 +6902,14 @@ static HAL_StatusTypeDef I2C_MasterRequestRead(I2C_HandleTypeDef *hi2c, uint16_t
     }
 
     /* Clear ADDR flag */
+    //读出sr1 和 sr2 寄存器 
     __HAL_I2C_CLEAR_ADDRFLAG(hi2c);
 
+    //发出起始信号
     /* Generate Restart */
     SET_BIT(hi2c->Instance->CR1, I2C_CR1_START);
 
+    //等待启始地址发出
     /* Wait until SB flag is set */
     if (I2C_WaitOnFlagUntilTimeout(hi2c, I2C_FLAG_SB, RESET, Timeout, Tickstart) != HAL_OK)
     {
@@ -6806,6 +6921,7 @@ static HAL_StatusTypeDef I2C_MasterRequestRead(I2C_HandleTypeDef *hi2c, uint16_t
     }
 
     /* Send header of slave address */
+    //发送头地址
     hi2c->Instance->DR = I2C_10BIT_HEADER_READ(DevAddress);
   }
 
@@ -7295,6 +7411,7 @@ static void I2C_DMAAbort(DMA_HandleTypeDef *hdma)
   * @param  Tickstart Tick start value
   * @retval HAL status
   */
+//等待I2c某个Flag(寄存器)不等于status直到超时
 static HAL_StatusTypeDef I2C_WaitOnFlagUntilTimeout(I2C_HandleTypeDef *hi2c, uint32_t Flag, FlagStatus Status, uint32_t Timeout, uint32_t Tickstart)
 {
   /* Wait until flag is set */
@@ -7303,16 +7420,23 @@ static HAL_StatusTypeDef I2C_WaitOnFlagUntilTimeout(I2C_HandleTypeDef *hi2c, uin
     /* Check for the Timeout */
     if (Timeout != HAL_MAX_DELAY)
     {
+      //等待时间已经超时超时
       if (((HAL_GetTick() - Tickstart) > Timeout) || (Timeout == 0U))
       {
+        //FLAG状态未改变
         if ((__HAL_I2C_GET_FLAG(hi2c, Flag) == Status))
         {
+          //先前状态
           hi2c->PreviousState     = I2C_STATE_NONE;
+          //设备状态
           hi2c->State             = HAL_I2C_STATE_READY;
+          //重置发送模式
           hi2c->Mode              = HAL_I2C_MODE_NONE;
+          //设置错误码
           hi2c->ErrorCode         |= HAL_I2C_ERROR_TIMEOUT;
 
           /* Process Unlocked */
+          //解锁I2c
           __HAL_UNLOCK(hi2c);
 
           return HAL_ERROR;
@@ -7334,37 +7458,46 @@ static HAL_StatusTypeDef I2C_WaitOnFlagUntilTimeout(I2C_HandleTypeDef *hi2c, uin
   */
 static HAL_StatusTypeDef I2C_WaitOnMasterAddressFlagUntilTimeout(I2C_HandleTypeDef *hi2c, uint32_t Flag, uint32_t Timeout, uint32_t Tickstart)
 {
+  //当SR1和SR2寄存器对应的位不为flag对应时
   while (__HAL_I2C_GET_FLAG(hi2c, Flag) == RESET)
   {
+    //SR1 bit10 应答失败 从机没有返回应答
     if (__HAL_I2C_GET_FLAG(hi2c, I2C_FLAG_AF) == SET)
     {
       /* Generate Stop */
+      // CR1 bit9 检测到超时错误设置停止条件产生
       SET_BIT(hi2c->Instance->CR1, I2C_CR1_STOP);
 
       /* Clear AF Flag */
+      //SR1 bit10 清除应答失败
       __HAL_I2C_CLEAR_FLAG(hi2c, I2C_FLAG_AF);
 
       hi2c->PreviousState       = I2C_STATE_NONE;
       hi2c->State               = HAL_I2C_STATE_READY;
       hi2c->Mode                = HAL_I2C_MODE_NONE;
+      //设置错误码为应答失败
       hi2c->ErrorCode           |= HAL_I2C_ERROR_AF;
 
       /* Process Unlocked */
+      //解锁I2c
       __HAL_UNLOCK(hi2c);
 
       return HAL_ERROR;
     }
 
+    //超时
     /* Check for the Timeout */
     if (Timeout != HAL_MAX_DELAY)
     {
       if (((HAL_GetTick() - Tickstart) > Timeout) || (Timeout == 0U))
       {
+        //寄存器的对应flag错误时
         if ((__HAL_I2C_GET_FLAG(hi2c, Flag) == RESET))
         {
           hi2c->PreviousState       = I2C_STATE_NONE;
           hi2c->State               = HAL_I2C_STATE_READY;
           hi2c->Mode                = HAL_I2C_MODE_NONE;
+          //错误码为超时错误
           hi2c->ErrorCode           |= HAL_I2C_ERROR_TIMEOUT;
 
           /* Process Unlocked */
@@ -7388,9 +7521,11 @@ static HAL_StatusTypeDef I2C_WaitOnMasterAddressFlagUntilTimeout(I2C_HandleTypeD
   */
 static HAL_StatusTypeDef I2C_WaitOnTXEFlagUntilTimeout(I2C_HandleTypeDef *hi2c, uint32_t Timeout, uint32_t Tickstart)
 {
+  //当TXE寄存器非空 SR1 bit7
   while (__HAL_I2C_GET_FLAG(hi2c, I2C_FLAG_TXE) == RESET)
   {
     /* Check if a NACK is detected */
+    //检查是否应答失败 (第一次使用是判断发送地址后是否有回答)
     if (I2C_IsAcknowledgeFailed(hi2c) != HAL_OK)
     {
       return HAL_ERROR;
@@ -7401,11 +7536,13 @@ static HAL_StatusTypeDef I2C_WaitOnTXEFlagUntilTimeout(I2C_HandleTypeDef *hi2c, 
     {
       if (((HAL_GetTick() - Tickstart) > Timeout) || (Timeout == 0U))
       {
+        //发送寄存器持续非空
         if ((__HAL_I2C_GET_FLAG(hi2c, I2C_FLAG_TXE) == RESET))
         {
           hi2c->PreviousState       = I2C_STATE_NONE;
           hi2c->State               = HAL_I2C_STATE_READY;
           hi2c->Mode                = HAL_I2C_MODE_NONE;
+          //超时错误
           hi2c->ErrorCode           |= HAL_I2C_ERROR_TIMEOUT;
 
           /* Process Unlocked */
@@ -7431,13 +7568,15 @@ static HAL_StatusTypeDef I2C_WaitOnBTFFlagUntilTimeout(I2C_HandleTypeDef *hi2c, 
 {
   while (__HAL_I2C_GET_FLAG(hi2c, I2C_FLAG_BTF) == RESET)
   {
-    /* Check if a NACK is detected */
+    //未应答
     if (I2C_IsAcknowledgeFailed(hi2c) != HAL_OK)
+    /* Check if a NACK is detected */
     {
       return HAL_ERROR;
     }
 
     /* Check for the Timeout */
+    //超时且字节发送未被设置
     if (Timeout != HAL_MAX_DELAY)
     {
       if (((HAL_GetTick() - Tickstart) > Timeout) || (Timeout == 0U))
@@ -7591,6 +7730,7 @@ static HAL_StatusTypeDef I2C_IsAcknowledgeFailed(I2C_HandleTypeDef *hi2c)
     hi2c->PreviousState       = I2C_STATE_NONE;
     hi2c->State               = HAL_I2C_STATE_READY;
     hi2c->Mode                = HAL_I2C_MODE_NONE;
+    //未响应错误
     hi2c->ErrorCode           |= HAL_I2C_ERROR_AF;
 
     /* Process Unlocked */

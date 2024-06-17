@@ -44,6 +44,7 @@ Core/Src/spi.c \
 Core/Src/stm32f1xx_hal_msp.c \
 Core/Src/stm32f1xx_it.c \
 Core/Src/system_stm32f1xx.c \
+Core/Src/uart_printf.c \
 Core/Src/usart.c \
 Drivers/STM32F1xx_HAL_Driver/Src/stm32f1xx_hal.c \
 Drivers/STM32F1xx_HAL_Driver/Src/stm32f1xx_hal_cortex.c \

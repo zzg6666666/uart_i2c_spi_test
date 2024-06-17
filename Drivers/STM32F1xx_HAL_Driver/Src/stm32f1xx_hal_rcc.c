@@ -356,16 +356,23 @@ HAL_StatusTypeDef HAL_RCC_OscConfig(RCC_OscInitTypeDef  *RCC_OscInitStruct)
   /* Check the parameters */
   assert_param(IS_RCC_OSCILLATORTYPE(RCC_OscInitStruct->OscillatorType));
 
+  //配置HSE时钟(开启或者关闭)
   /*------------------------------- HSE Configuration ------------------------*/
   if (((RCC_OscInitStruct->OscillatorType) & RCC_OSCILLATORTYPE_HSE) == RCC_OSCILLATORTYPE_HSE)
   {
     /* Check the parameters */
     assert_param(IS_RCC_HSE(RCC_OscInitStruct->HSEState));
 
-    /* When the HSE is used as system clock or clock source for PLL in these cases it is not allowed to be disabled */
-    if ((__HAL_RCC_GET_SYSCLK_SOURCE() == RCC_SYSCLKSOURCE_STATUS_HSE)
+    //当HSE被用作系统时钟，或者PLL时钟被作为系统时钟且HSE是PLL时钟时，HSE必须开启
+
+    /* When the HSE is used as system clock or clock source for PLL in these cases it is not allowed to be disabled 
+    RCC系统时钟源是系统时钟(读取寄存器)，或者RCC系统时钟源是PLL时钟，且PLL时钟源是HSE时钟
+    (当配置HSE为开启时，系统时钟源或PLL时钟源是HSI时钟，同时，HSI也是系统启动后默认的时钟(16000000))*/
+
+    if ((__HAL_RCC_GET_SYSCLK_SOURCE() == RCC_SYSCLKSOURCE_STATUS_HSE) //
         || ((__HAL_RCC_GET_SYSCLK_SOURCE() == RCC_SYSCLKSOURCE_STATUS_PLLCLK) && (__HAL_RCC_GET_PLL_OSCSOURCE() == RCC_PLLSOURCE_HSE)))
     {
+      //HSE就绪，且HSE状态要被设置关闭(当HSE被用作系统时钟或者PLL时钟时，HSE必须开启)
       if ((__HAL_RCC_GET_FLAG(RCC_FLAG_HSERDY) != RESET) && (RCC_OscInitStruct->HSEState == RCC_HSE_OFF))
       {
         return HAL_ERROR;
@@ -374,9 +381,10 @@ HAL_StatusTypeDef HAL_RCC_OscConfig(RCC_OscInitTypeDef  *RCC_OscInitStruct)
     else
     {
       /* Set the new HSE configuration ---------------------------------------*/
+      //设置HSE时钟状态(RCC->CR bit16)和旁路状态(RCC->CR bit18)
       __HAL_RCC_HSE_CONFIG(RCC_OscInitStruct->HSEState);
 
-
+      //检查HSE是否开启成功以及是否稳定
       /* Check the HSE State */
       if (RCC_OscInitStruct->HSEState != RCC_HSE_OFF)
       {
@@ -384,6 +392,7 @@ HAL_StatusTypeDef HAL_RCC_OscConfig(RCC_OscInitTypeDef  *RCC_OscInitStruct)
         tickstart = HAL_GetTick();
 
         /* Wait till HSE is ready */
+        //检查HSE时钟开启成功,是否稳定(RCC->CR bit17)
         while (__HAL_RCC_GET_FLAG(RCC_FLAG_HSERDY) == RESET)
         {
           if ((HAL_GetTick() - tickstart) > HSE_TIMEOUT_VALUE)
@@ -408,22 +417,28 @@ HAL_StatusTypeDef HAL_RCC_OscConfig(RCC_OscInitTypeDef  *RCC_OscInitStruct)
       }
     }
   }
+  //配置HSI
   /*----------------------------- HSI Configuration --------------------------*/
   if (((RCC_OscInitStruct->OscillatorType) & RCC_OSCILLATORTYPE_HSI) == RCC_OSCILLATORTYPE_HSI)
   {
     /* Check the parameters */
+    //检查HSI配置参数
     assert_param(IS_RCC_HSI(RCC_OscInitStruct->HSIState));
+    //检查HSI校准值
     assert_param(IS_RCC_CALIBRATION_VALUE(RCC_OscInitStruct->HSICalibrationValue));
 
+    //当HSI被用作系统时钟，或者PLL时钟被作为系统时钟且HSI是PLL时钟时，HSI必须开启
     /* Check if HSI is used as system clock or as PLL source when PLL is selected as system clock */
     if ((__HAL_RCC_GET_SYSCLK_SOURCE() == RCC_SYSCLKSOURCE_STATUS_HSI)
         || ((__HAL_RCC_GET_SYSCLK_SOURCE() == RCC_SYSCLKSOURCE_STATUS_PLLCLK) && (__HAL_RCC_GET_PLL_OSCSOURCE() == RCC_PLLSOURCE_HSI_DIV2)))
     {
+      //HSI就绪，且HSI状态要被设置关闭(当HSE被用作系统时钟或者PLL时钟时，HSI必须开启)
       /* When HSI is used as system clock it will not disabled */
       if ((__HAL_RCC_GET_FLAG(RCC_FLAG_HSIRDY) != RESET) && (RCC_OscInitStruct->HSIState != RCC_HSI_ON))
       {
         return HAL_ERROR;
       }
+      //HSI就绪，只能允许调整校准值
       /* Otherwise, just the calibration is allowed */
       else
       {
@@ -434,14 +449,17 @@ HAL_StatusTypeDef HAL_RCC_OscConfig(RCC_OscInitTypeDef  *RCC_OscInitStruct)
     else
     {
       /* Check the HSI State */
+      //打开HSI时钟
       if (RCC_OscInitStruct->HSIState != RCC_HSI_OFF)
       {
         /* Enable the Internal High Speed oscillator (HSI). */
+        //开启HSI时钟RCC->CR bit0 位带操作
         __HAL_RCC_HSI_ENABLE();
 
         /* Get Start Tick */
         tickstart = HAL_GetTick();
 
+        //检查HSI是否开启成功 开启HSI时钟RCC->CR bit1 
         /* Wait till HSI is ready */
         while (__HAL_RCC_GET_FLAG(RCC_FLAG_HSIRDY) == RESET)
         {
@@ -451,17 +469,20 @@ HAL_StatusTypeDef HAL_RCC_OscConfig(RCC_OscInitTypeDef  *RCC_OscInitStruct)
           }
         }
 
+        //调整HSI校准值
         /* Adjusts the Internal High Speed oscillator (HSI) calibration value.*/
         __HAL_RCC_HSI_CALIBRATIONVALUE_ADJUST(RCC_OscInitStruct->HSICalibrationValue);
       }
       else
       {
+        //关闭HSI
         /* Disable the Internal High Speed oscillator (HSI). */
         __HAL_RCC_HSI_DISABLE();
 
         /* Get Start Tick */
         tickstart = HAL_GetTick();
 
+        //等待HSI就绪
         /* Wait till HSI is disabled */
         while (__HAL_RCC_GET_FLAG(RCC_FLAG_HSIRDY) != RESET)
         {
@@ -473,22 +494,28 @@ HAL_StatusTypeDef HAL_RCC_OscConfig(RCC_OscInitTypeDef  *RCC_OscInitStruct)
       }
     }
   }
+  
+  //配置LSI
   /*------------------------------ LSI Configuration -------------------------*/
   if (((RCC_OscInitStruct->OscillatorType) & RCC_OSCILLATORTYPE_LSI) == RCC_OSCILLATORTYPE_LSI)
   {
     /* Check the parameters */
+    //检查LSI状态参数
     assert_param(IS_RCC_LSI(RCC_OscInitStruct->LSIState));
 
     /* Check the LSI State */
+    //打开LSI
     if (RCC_OscInitStruct->LSIState != RCC_LSI_OFF)
     {
       /* Enable the Internal Low Speed oscillator (LSI). */
+      //打开LSI 位带操作 RCC->CSR bit0
       __HAL_RCC_LSI_ENABLE();
 
       /* Get Start Tick */
       tickstart = HAL_GetTick();
 
       /* Wait till LSI is ready */
+      //等待LSI稳定 RCC->CSR bit1
       while (__HAL_RCC_GET_FLAG(RCC_FLAG_LSIRDY) == RESET)
       {
         if ((HAL_GetTick() - tickstart) > LSI_TIMEOUT_VALUE)
@@ -497,18 +524,21 @@ HAL_StatusTypeDef HAL_RCC_OscConfig(RCC_OscInitTypeDef  *RCC_OscInitStruct)
         }
       }
       /*  To have a fully stabilized clock in the specified range, a software delay of 1ms
-          should be added.*/
+          should be added.延迟1ms确保时钟更加稳定
+          */
       RCC_Delay(1);
     }
     else
     {
       /* Disable the Internal Low Speed oscillator (LSI). */
+      //关闭LSI 位带操作 RCC->CSR bit0
       __HAL_RCC_LSI_DISABLE();
 
       /* Get Start Tick */
       tickstart = HAL_GetTick();
 
       /* Wait till LSI is disabled */
+      //等待LSI稳定 RCC->CSR bit1
       while (__HAL_RCC_GET_FLAG(RCC_FLAG_LSIRDY) != RESET)
       {
         if ((HAL_GetTick() - tickstart) > LSI_TIMEOUT_VALUE)
@@ -518,27 +548,37 @@ HAL_StatusTypeDef HAL_RCC_OscConfig(RCC_OscInitTypeDef  *RCC_OscInitStruct)
       }
     }
   }
+  
+  //配置LSE
   /*------------------------------ LSE Configuration -------------------------*/
   if (((RCC_OscInitStruct->OscillatorType) & RCC_OSCILLATORTYPE_LSE) == RCC_OSCILLATORTYPE_LSE)
   {
     FlagStatus       pwrclkchanged = RESET;
 
     /* Check the parameters */
+    //检查LSEState状态
     assert_param(IS_RCC_LSE(RCC_OscInitStruct->LSEState));
 
+    //更新域备份控制器中LSE配置，要求有必要的写域备份控制器的权限
     /* Update LSE configuration in Backup Domain control register    */
     /* Requires to enable write access to Backup Domain of necessary */
+
+    //检查电源接口时钟未开启
     if (__HAL_RCC_PWR_IS_CLK_DISABLED())
     {
+      //打开电源接口时钟
       __HAL_RCC_PWR_CLK_ENABLE();
       pwrclkchanged = SET;
     }
 
+    //禁止写入RTC和后备寄存器 PWR->CR bit8
     if (HAL_IS_BIT_CLR(PWR->CR, PWR_CR_DBP))
     {
       /* Enable write access to Backup domain */
+      //打开写入RTC和后备寄存器权限
       SET_BIT(PWR->CR, PWR_CR_DBP);
 
+      //等待电源控制寄存器写权限稳定
       /* Wait for Backup domain Write protection disable */
       tickstart = HAL_GetTick();
 
@@ -551,7 +591,9 @@ HAL_StatusTypeDef HAL_RCC_OscConfig(RCC_OscInitTypeDef  *RCC_OscInitStruct)
       }
     }
 
+    //设置LSE配置
     /* Set the new LSE configuration -----------------------------------------*/
+    //设置LSE时钟状态(RCC->BDCR bit0)和旁路状态(RCC->CR bit2)
     __HAL_RCC_LSE_CONFIG(RCC_OscInitStruct->LSEState);
     /* Check the LSE State */
     if (RCC_OscInitStruct->LSEState != RCC_LSE_OFF)
@@ -560,6 +602,7 @@ HAL_StatusTypeDef HAL_RCC_OscConfig(RCC_OscInitTypeDef  *RCC_OscInitStruct)
       tickstart = HAL_GetTick();
 
       /* Wait till LSE is ready */
+      //等待LSE稳定 RCC->BDCR bit1
       while (__HAL_RCC_GET_FLAG(RCC_FLAG_LSERDY) == RESET)
       {
         if ((HAL_GetTick() - tickstart) > RCC_LSE_TIMEOUT_VALUE)
@@ -586,6 +629,7 @@ HAL_StatusTypeDef HAL_RCC_OscConfig(RCC_OscInitTypeDef  *RCC_OscInitStruct)
     /* Require to disable power clock if necessary */
     if (pwrclkchanged == SET)
     {
+      //关闭写写域备份控制器的权限
       __HAL_RCC_PWR_CLK_DISABLE();
     }
   }
@@ -680,26 +724,34 @@ HAL_StatusTypeDef HAL_RCC_OscConfig(RCC_OscInitTypeDef  *RCC_OscInitStruct)
   }
 
 #endif /* RCC_CR_PLL2ON */
+  //配置PLL
   /*-------------------------------- PLL Configuration -----------------------*/
   /* Check the parameters */
   assert_param(IS_RCC_PLL(RCC_OscInitStruct->PLL.PLLState));
   if ((RCC_OscInitStruct->PLL.PLLState) != RCC_PLL_NONE)
   {
+    //PLL是否被用作系统时钟，只有当PLL没有被被用作系统时钟才能操作
     /* Check if the PLL is used as system clock or not */
     if (__HAL_RCC_GET_SYSCLK_SOURCE() != RCC_SYSCLKSOURCE_STATUS_PLLCLK)
-    {
+    { 
+      //使能PLL
       if ((RCC_OscInitStruct->PLL.PLLState) == RCC_PLL_ON)
       {
         /* Check the parameters */
         assert_param(IS_RCC_PLLSOURCE(RCC_OscInitStruct->PLL.PLLSource));
         assert_param(IS_RCC_PLL_MUL(RCC_OscInitStruct->PLL.PLLMUL));
 
+        //关掉PLL RCC->CR,bit24
+        //位段操作
+        //((uint32_t)(0x42000000)+(0x21000*32)+(24*4))
         /* Disable the main PLL. */
         __HAL_RCC_PLL_DISABLE();
 
         /* Get Start Tick */
         tickstart = HAL_GetTick();
 
+      
+        //RCC->CR bit25 等待PLL稳定
         /* Wait till PLL is disabled */
         while (__HAL_RCC_GET_FLAG(RCC_FLAG_PLLRDY)  != RESET)
         {
@@ -710,10 +762,12 @@ HAL_StatusTypeDef HAL_RCC_OscConfig(RCC_OscInitTypeDef  *RCC_OscInitStruct)
         }
 
         /* Configure the HSE prediv factor --------------------------------*/
+        //配置HSE预分频
         /* It can be written only when the PLL is disabled. Not used in PLL source is different than HSE */
         if (RCC_OscInitStruct->PLL.PLLSource == RCC_PLLSOURCE_HSE)
         {
           /* Check the parameter */
+          //检查HSE分频参数
           assert_param(IS_RCC_HSE_PREDIV(RCC_OscInitStruct->HSEPredivValue));
 #if defined(RCC_CFGR2_PREDIV1SRC)
           assert_param(IS_RCC_PREDIV1_SOURCE(RCC_OscInitStruct->Prediv1Source));
@@ -723,18 +777,23 @@ HAL_StatusTypeDef HAL_RCC_OscConfig(RCC_OscInitTypeDef  *RCC_OscInitStruct)
 #endif /* RCC_CFGR2_PREDIV1SRC */
 
           /* Set PREDIV1 Value */
+          //配置HSE分频参数
+          //RCC-CFGR bit17
           __HAL_RCC_HSE_PREDIV_CONFIG(RCC_OscInitStruct->HSEPredivValue);
         }
-
+        
+        //配置PLL来源和PLL倍频数
+        //RCC-CFGR bit16 、 bit21:18
         /* Configure the main PLL clock source and multiplication factors. */
         __HAL_RCC_PLL_CONFIG(RCC_OscInitStruct->PLL.PLLSource,
                              RCC_OscInitStruct->PLL.PLLMUL);
         /* Enable the main PLL. */
+        //使能PLL
         __HAL_RCC_PLL_ENABLE();
 
         /* Get Start Tick */
         tickstart = HAL_GetTick();
-
+        //等待PLL就绪
         /* Wait till PLL is ready */
         while (__HAL_RCC_GET_FLAG(RCC_FLAG_PLLRDY)  == RESET)
         {
@@ -744,9 +803,10 @@ HAL_StatusTypeDef HAL_RCC_OscConfig(RCC_OscInitTypeDef  *RCC_OscInitStruct)
           }
         }
       }
-      else
+      else//失能PLL
       {
         /* Disable the main PLL. */
+        //位段操作
         __HAL_RCC_PLL_DISABLE();
 
         /* Get Start Tick */
@@ -762,8 +822,10 @@ HAL_StatusTypeDef HAL_RCC_OscConfig(RCC_OscInitTypeDef  *RCC_OscInitStruct)
         }
       }
     }
+    //PLL已经被当作系统时钟源
     else
-    {
+    { 
+      //关闭PLL时钟
       /* Check if there is a request to disable the PLL used as System clock source */
       if ((RCC_OscInitStruct->PLL.PLLState) == RCC_PLL_OFF)
       {
@@ -771,6 +833,7 @@ HAL_StatusTypeDef HAL_RCC_OscConfig(RCC_OscInitTypeDef  *RCC_OscInitStruct)
       }
       else
       {
+        //其他配置
         /* Do not return HAL_ERROR if request repeats the current configuration */
         pll_config = RCC->CFGR;
         if ((READ_BIT(pll_config, RCC_CFGR_PLLSRC) != RCC_OscInitStruct->PLL.PLLSource) ||
@@ -820,12 +883,15 @@ HAL_StatusTypeDef HAL_RCC_ClockConfig(RCC_ClkInitTypeDef  *RCC_ClkInitStruct, ui
 
   /* Check the parameters */
   assert_param(IS_RCC_CLOCKTYPE(RCC_ClkInitStruct->ClockType));
+  //检查SYSCLK(系统时钟)周期与闪存访问时间的比例
   assert_param(IS_FLASH_LATENCY(FLatency));
 
   /* To correctly read data from FLASH memory, the number of wait states (LATENCY)
   must be correctly programmed according to the frequency of the CPU clock
     (HCLK) of the device. */
 
+
+//FLASH_ACR bit2-0
 #if defined(FLASH_ACR_LATENCY)
   /* Increasing the number of wait states because of higher CPU frequency */
   if (FLatency > __HAL_FLASH_GET_LATENCY())
@@ -842,21 +908,26 @@ HAL_StatusTypeDef HAL_RCC_ClockConfig(RCC_ClkInitTypeDef  *RCC_ClkInitStruct, ui
 }
 
 #endif /* FLASH_ACR_LATENCY */
+//配置HCLK时钟
 /*-------------------------- HCLK Configuration --------------------------*/
 if (((RCC_ClkInitStruct->ClockType) & RCC_CLOCKTYPE_HCLK) == RCC_CLOCKTYPE_HCLK)
   {
     /* Set the highest APBx dividers in order to ensure that we do not go through
     a non-spec phase whatever we decrease or increase HCLK. */
+    //开启PCLK1
     if (((RCC_ClkInitStruct->ClockType) & RCC_CLOCKTYPE_PCLK1) == RCC_CLOCKTYPE_PCLK1)
     {
+      //HCLK分频16倍到APB1, PCLK1
       MODIFY_REG(RCC->CFGR, RCC_CFGR_PPRE1, RCC_HCLK_DIV16);
     }
 
     if (((RCC_ClkInitStruct->ClockType) & RCC_CLOCKTYPE_PCLK2) == RCC_CLOCKTYPE_PCLK2)
     {
+      //HCLK分频16倍到APB2, PCLK2
       MODIFY_REG(RCC->CFGR, RCC_CFGR_PPRE2, (RCC_HCLK_DIV16 << 3));
     }
 
+    //设置HCLK分频倍率，SYSCLK分频后变成HCLK
     /* Set the new HCLK clock divider */
     assert_param(IS_RCC_HCLK(RCC_ClkInitStruct->AHBCLKDivider));
     MODIFY_REG(RCC->CFGR, RCC_CFGR_HPRE, RCC_ClkInitStruct->AHBCLKDivider);
@@ -868,18 +939,22 @@ if (((RCC_ClkInitStruct->ClockType) & RCC_CLOCKTYPE_HCLK) == RCC_CLOCKTYPE_HCLK)
     assert_param(IS_RCC_SYSCLKSOURCE(RCC_ClkInitStruct->SYSCLKSource));
 
     /* HSE is selected as System Clock Source */
+    //时钟源是HSE
     if (RCC_ClkInitStruct->SYSCLKSource == RCC_SYSCLKSOURCE_HSE)
     {
       /* Check the HSE ready flag */
+      //检查HSE是否就绪 RCC->CR bit17
       if (__HAL_RCC_GET_FLAG(RCC_FLAG_HSERDY) == RESET)
       {
         return HAL_ERROR;
       }
     }
+    //时钟源是PLL
     /* PLL is selected as System Clock Source */
     else if (RCC_ClkInitStruct->SYSCLKSource == RCC_SYSCLKSOURCE_PLLCLK)
     {
       /* Check the PLL ready flag */
+      //检查PLL是否就绪 RCC->CR bit25
       if (__HAL_RCC_GET_FLAG(RCC_FLAG_PLLRDY) == RESET)
       {
         return HAL_ERROR;
@@ -889,16 +964,19 @@ if (((RCC_ClkInitStruct->ClockType) & RCC_CLOCKTYPE_HCLK) == RCC_CLOCKTYPE_HCLK)
     else
     {
       /* Check the HSI ready flag */
+      //RCC->CR bit1
       if (__HAL_RCC_GET_FLAG(RCC_FLAG_HSIRDY) == RESET)
       {
         return HAL_ERROR;
       }
     }
+    //切换时钟源
     __HAL_RCC_SYSCLK_CONFIG(RCC_ClkInitStruct->SYSCLKSource);
 
     /* Get Start Tick */
     tickstart = HAL_GetTick();
 
+    //检查时钟源是否已经切换 RCC->CFGR bit 3:2
     while (__HAL_RCC_GET_SYSCLK_SOURCE() != (RCC_ClkInitStruct->SYSCLKSource << RCC_CFGR_SWS_Pos))
     {
       if ((HAL_GetTick() - tickstart) > CLOCKSWITCH_TIMEOUT_VALUE)
@@ -924,21 +1002,27 @@ if (((RCC_ClkInitStruct->ClockType) & RCC_CLOCKTYPE_HCLK) == RCC_CLOCKTYPE_HCLK)
 }
 #endif /* FLASH_ACR_LATENCY */
 
+//配置PCLK1 HCLK分频后PCLK1
 /*-------------------------- PCLK1 Configuration ---------------------------*/
 if (((RCC_ClkInitStruct->ClockType) & RCC_CLOCKTYPE_PCLK1) == RCC_CLOCKTYPE_PCLK1)
   {
+    //检查APB1分频参数
     assert_param(IS_RCC_PCLK(RCC_ClkInitStruct->APB1CLKDivider));
+    //设置APB1分频参数
     MODIFY_REG(RCC->CFGR, RCC_CFGR_PPRE1, RCC_ClkInitStruct->APB1CLKDivider);
   }
 
   /*-------------------------- PCLK2 Configuration ---------------------------*/
   if (((RCC_ClkInitStruct->ClockType) & RCC_CLOCKTYPE_PCLK2) == RCC_CLOCKTYPE_PCLK2)
   {
+    //检查APB12分频参数
     assert_param(IS_RCC_PCLK(RCC_ClkInitStruct->APB2CLKDivider));
+    //设置APB2参数
     MODIFY_REG(RCC->CFGR, RCC_CFGR_PPRE2, ((RCC_ClkInitStruct->APB2CLKDivider) << 3));
   }
 
   /* Update the SystemCoreClock global variable */
+  //更新系统时钟频率
   SystemCoreClock = HAL_RCC_GetSysClockFreq() >> AHBPrescTable[(RCC->CFGR & RCC_CFGR_HPRE) >> RCC_CFGR_HPRE_Pos];
 
   /* Configure the source of time base considering new system clocks settings*/
@@ -1100,21 +1184,28 @@ uint32_t HAL_RCC_GetSysClockFreq(void)
   tmpreg = RCC->CFGR;
 
   /* Get SYSCLK source -------------------------------------------------------*/
+  //当前时钟源
   switch (tmpreg & RCC_CFGR_SWS)
   {
+    //HSE为系统时钟源
     case RCC_SYSCLKSOURCE_STATUS_HSE:  /* HSE used as system clock */
     {
+      //当前晶振频率
       sysclockfreq = HSE_VALUE;
       break;
     }
+    //PLL是时钟源
     case RCC_SYSCLKSOURCE_STATUS_PLLCLK:  /* PLL used as system clock */
     {
+      //PLL倍频数
       pllmul = aPLLMULFactorTable[(uint32_t)(tmpreg & RCC_CFGR_PLLMULL) >> RCC_CFGR_PLLMULL_Pos];
+      //PLL的来源是HSE输入不是HSI2分频后输入
       if ((tmpreg & RCC_CFGR_PLLSRC) != RCC_PLLSOURCE_HSI_DIV2)
       {
+//互联型
 #if defined(RCC_CFGR2_PREDIV1)
         prediv = aPredivFactorTable[(uint32_t)(RCC->CFGR2 & RCC_CFGR2_PREDIV1) >> RCC_CFGR2_PREDIV1_Pos];
-#else
+#else   //HSE分频倍数
         prediv = aPredivFactorTable[(uint32_t)(RCC->CFGR & RCC_CFGR_PLLXTPRE) >> RCC_CFGR_PLLXTPRE_Pos];
 #endif /*RCC_CFGR2_PREDIV1*/
 #if defined(RCC_CFGR2_PREDIV1SRC)
@@ -1141,17 +1232,21 @@ uint32_t HAL_RCC_GetSysClockFreq(void)
         }
 #else
         /* HSE used as PLL clock source : PLLCLK = HSE/PREDIV1 * PLLMUL */
+        //Pllck的频率 = HSE输入 x pll倍频 /HSE预分频
         pllclk = (uint32_t)((HSE_VALUE  * pllmul) / prediv);
 #endif /*RCC_CFGR2_PREDIV1SRC*/
       }
       else
       {
         /* HSI used as PLL clock source : PLLCLK = HSI/2 * PLLMUL */
+        //pllclk倍频次数相较于hsi
         pllclk = (uint32_t)((HSI_VALUE >> 1) * pllmul);
       }
+      //系统频率
       sysclockfreq = pllclk;
       break;
     }
+    //HSI用于pll
     case RCC_SYSCLKSOURCE_STATUS_HSI:  /* HSI used as system clock source */
     default: /* HSI used as system clock */
     {
